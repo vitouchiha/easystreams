@@ -75,11 +75,10 @@ Quando l'addon viene eseguito su un server remoto (non in locale), alcuni provid
 1.  Crea un nuovo Worker su Cloudflare.
 2.  Incolla il codice contenuto nel file `worker.js` di questo repository.
 3.  Salva e pubblica il worker per ottenere un URL (es. `https://mio-proxy.workers.dev/`).
-4.  Imposta la variabile d'ambiente sul tuo server:
+4.  Imposta la variabile d'ambiente `CF_PROXY_URL` con l'URL del worker (consigliato):
     ```text
-    CF_PROXY_URL=https://mio-proxy.workers.dev/
+    CF_PROXY_URL=https://mio-proxy.workers.dev
     ```
-
 ---
 
 ## 🛠️ Sviluppo

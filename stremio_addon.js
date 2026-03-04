@@ -80,36 +80,19 @@ const express = require('express');
 const app = express();
 const path = require('path');
 const { getProviderUrl } = require('./src/provider_urls.js');
-const ENC_CF_WORKER =
+const CF_PROXY_URL_ENV =
     typeof process !== 'undefined' &&
     process &&
     process.env &&
-    typeof process.env.ENC_CF_WORKER === 'string'
-        ? process.env.ENC_CF_WORKER
+    typeof process.env.CF_PROXY_URL === 'string'
+        ? process.env.CF_PROXY_URL
         : '';
+const normalizedProxyEnv = String(CF_PROXY_URL_ENV || '').trim().replace(/\/+$/, '');
 
-function decodeBase64UrlSafe(value) {
-    const raw = String(value || '').trim();
-    if (!raw) return '';
-    if (/^https?:\/\//i.test(raw)) return raw;
-
-    const normalized = raw.replace(/-/g, '+').replace(/_/g, '/');
-    const padding = normalized.length % 4 === 0 ? '' : '='.repeat(4 - (normalized.length % 4));
-    const base64 = normalized + padding;
-
-    try {
-        return Buffer.from(base64, 'base64').toString('utf8');
-    } catch {
-        return '';
-    }
-}
-
-// Set global proxy from encoded CF worker value.
-const decodedCfWorker = decodeBase64UrlSafe(ENC_CF_WORKER).trim();
-if (/^https?:\/\//i.test(decodedCfWorker)) {
-    global.ENC_CF_WORKER = ENC_CF_WORKER;
-    global.CF_PROXY_URL = decodedCfWorker.replace(/\/+$/, '');
-    logInfo(`[Proxy] Global CF_PROXY_URL set: ${global.CF_PROXY_URL}`);
+// Set global proxy URL from CF_PROXY_URL env only.
+if (/^https?:\/\//i.test(normalizedProxyEnv)) {
+    global.CF_PROXY_URL = normalizedProxyEnv;
+    logInfo(`[Proxy] Global CF_PROXY_URL set from CF_PROXY_URL: ${global.CF_PROXY_URL}`);
 }
 
 // Performance Metrics
