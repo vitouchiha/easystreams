@@ -188,12 +188,6 @@ function parseEpisodeNumber(value, fallbackNum) {
     if (Number.isFinite(parsed) && parsed > 0) return parsed;
   }
 
-  const byAny = raw.match(/(\d{1,4})/);
-  if (byAny) {
-    const parsed = Number.parseInt(byAny[1], 10);
-    if (Number.isFinite(parsed) && parsed > 0) return parsed;
-  }
-
   return fallbackNum;
 }
 
@@ -509,8 +503,6 @@ function pickEpisodeEntry(episodes, requestedEpisode, mediaType = "tv") {
   const episode = normalizeRequestedEpisode(requestedEpisode);
   const byNum = list.find((entry) => entry.num === episode);
   if (byNum) return byNum;
-  const byIndex = list[episode - 1];
-  if (byIndex) return byIndex;
   if (episode === 1) return list[0];
   return null;
 }
@@ -587,6 +579,7 @@ function normalizeHostLabel(rawUrl) {
 
 async function resolveWatchUrlsForEpisodeEntry(source, episodeEntry) {
   const urls = [];
+  const hasEpisodePath = Boolean(episodeEntry?.episodePath);
 
   if (episodeEntry?.watchUrl) {
     urls.push(...extractWatchUrlsFromHtml(episodeEntry.watchUrl));
@@ -606,6 +599,12 @@ async function resolveWatchUrlsForEpisodeEntry(source, episodeEntry) {
         console.error("[AnimeSaturn] episode page request failed:", error.message);
       }
     }
+  }
+
+  if (hasEpisodePath && urls.length === 0) {
+    const epLabel = Number.isFinite(Number(episodeEntry?.num)) ? episodeEntry.num : "?";
+    console.log(`[AnimeSaturn] No watch links for episode ${epLabel}. Skipping fallback.`);
+    return [];
   }
 
   if (urls.length === 0 && source?.animePath) {
@@ -650,7 +649,7 @@ async function mapLimit(values, limit, mapper) {
   return output;
 }
 
-async function extractStreamsFromAnimePath(animePath, requestedEpisode, mediaType = "tv") {
+async function extractStreamsFromAnimePath(animePath, requestedEpisode, mediaType = "tv", originalEpisode = null) {
   const normalizedPath = normalizeAnimeSaturnPath(animePath);
   if (!normalizedPath) return [];
 
@@ -671,10 +670,15 @@ async function extractStreamsFromAnimePath(animePath, requestedEpisode, mediaTyp
   }
 
   const normalizedEpisode = normalizeRequestedEpisode(requestedEpisode);
+  const normalizedOriginalEpisode = normalizeRequestedEpisode(
+    originalEpisode === null || originalEpisode === undefined ? normalizedEpisode : originalEpisode
+  );
   let episodes = normalizeEpisodesList(parsedPage.episodes);
   let selected = pickEpisodeEntry(episodes, normalizedEpisode, mediaType);
 
+  const allowRelated = String(parsedPage.sourceTag || "").toUpperCase() !== "ITA";
   if (
+    allowRelated &&
     (!selected || episodes.length === 0) &&
     Array.isArray(parsedPage.relatedAnimePaths) &&
     parsedPage.relatedAnimePaths.length > 0
@@ -701,6 +705,10 @@ async function extractStreamsFromAnimePath(animePath, requestedEpisode, mediaTyp
 
   const baseTitle = sanitizeAnimeTitle(parsedPage.title) || "Unknown Title";
   const resolvedEpisode = parsePositiveInt(selected.num) || normalizedEpisode;
+  if (String(parsedPage.sourceTag || "").toUpperCase() === "ITA" && resolvedEpisode !== normalizedOriginalEpisode) {
+    console.log(`[AnimeSaturn] Skipping ITA episode ${resolvedEpisode} (requested ${normalizedOriginalEpisode}).`);
+    return [];
+  }
   const displayTitle = mediaType === "movie" ? baseTitle : `${baseTitle} - Ep ${resolvedEpisode}`;
   const streamLanguage = resolveLanguageEmoji(parsedPage.sourceTag);
 
@@ -1055,11 +1063,12 @@ async function getStreams(id, type, season, episode, providerContext = null) {
     if (animePaths.length === 0) return [];
 
     const requestedEpisode = resolveEpisodeFromMappingPayload(mappingPayload, lookup.episode);
+    const originalRequestedEpisode = normalizeRequestedEpisode(lookup.episode);
     const normalizedType = String(type || "").toLowerCase();
     const mediaType = normalizedType === "movie" ? "movie" : "tv";
 
     const perPathStreams = await mapLimit(animePaths, 3, (path) =>
-      extractStreamsFromAnimePath(path, requestedEpisode, mediaType)
+      extractStreamsFromAnimePath(path, requestedEpisode, mediaType, originalRequestedEpisode)
     );
 
     const streams = perPathStreams.flat().filter((stream) => stream && stream.url);

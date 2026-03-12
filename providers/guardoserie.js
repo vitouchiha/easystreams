@@ -7401,8 +7401,8 @@ var require_provider_urls = __commonJS({
       animesaturn: "https://www.animesaturn.cx",
       streamingcommunity: "https://vixsrc.to",
       guardahd: "https://guardahd.stream",
-      guardaserie: "https://guardaserietv.autos",
-      guardoserie: "https://guardoserie.space",
+      guardaserie: "https://guardaserietv.skin",
+      guardoserie: "https://guardoserie.best",
       mapping_api: "https://animemapping.stremio.dpdns.org"
     };
   }

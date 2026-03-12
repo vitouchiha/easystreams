@@ -63,8 +63,8 @@ var require_provider_urls = __commonJS({
       animesaturn: "https://www.animesaturn.cx",
       streamingcommunity: "https://vixsrc.to",
       guardahd: "https://guardahd.stream",
-      guardaserie: "https://guardaserietv.autos",
-      guardoserie: "https://guardoserie.space",
+      guardaserie: "https://guardaserietv.skin",
+      guardoserie: "https://guardoserie.best",
       mapping_api: "https://animemapping.stremio.dpdns.org"
     };
   }
@@ -8947,6 +8947,15 @@ var require_streamingcommunity = __commonJS({
     var { formatStream } = require_formatter();
     require_fetch_helper();
     var { checkQualityFromText } = require_quality_helper();
+    function safeRequire(modulePath) {
+      try {
+        return require(modulePath);
+      } catch (e) {
+        return null;
+      }
+    }
+    var guardahd2 = safeRequire("../guardahd/index");
+    var guardaserie2 = safeRequire("../guardaserie/index");
     var TMDB_API_KEY2 = "68e094699525b18a70bab2f86b1fa706";
     var USER_AGENT = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36";
     function getCommonHeaders() {
@@ -9034,6 +9043,31 @@ var require_streamingcommunity = __commonJS({
         }
       });
     }
+    function hasGuardaFallbackResults(id, type, season, episode, providerContext) {
+      return __async(this, null, function* () {
+        const normalizedType = String(type).toLowerCase();
+        const checks = [];
+        if (normalizedType === "movie" && guardahd2 && typeof guardahd2.getStreams === "function") {
+          checks.push(
+            guardahd2.getStreams(id, normalizedType, season, episode).then((streams) => Array.isArray(streams) && streams.length > 0).catch((e) => {
+              console.warn("[StreamingCommunity] GuardaHD fallback check failed:", e);
+              return false;
+            })
+          );
+        }
+        if (normalizedType === "tv" && guardaserie2 && typeof guardaserie2.getStreams === "function") {
+          checks.push(
+            guardaserie2.getStreams(id, normalizedType, season, episode, providerContext).then((streams) => Array.isArray(streams) && streams.length > 0).catch((e) => {
+              console.warn("[StreamingCommunity] Guardaserie fallback check failed:", e);
+              return false;
+            })
+          );
+        }
+        if (checks.length === 0) return false;
+        const results = yield Promise.all(checks);
+        return results.some(Boolean);
+      });
+    }
     function getStreams2(id, type, season, episode, providerContext = null) {
       return __async(this, null, function* () {
         const normalizedType = String(type).toLowerCase();
@@ -9111,8 +9145,13 @@ var require_streamingcommunity = __commonJS({
                 if (hasItalian || originalLanguageItalian) {
                   console.log(`[StreamingCommunity] Verified: Has Italian audio or original language is Italian.`);
                 } else {
-                  console.log(`[StreamingCommunity] No Italian audio found in playlist and original language is not Italian. Skipping.`);
-                  return [];
+                  console.log(`[StreamingCommunity] No Italian audio found in playlist and original language is not Italian. Checking GuardaHD/Guardaserie.`);
+                  const fallbackOk = yield hasGuardaFallbackResults(id, normalizedType, resolvedSeason, episode, providerContext);
+                  if (!fallbackOk) {
+                    console.log(`[StreamingCommunity] Skipping non-Italian stream: no GuardaHD/Guardaserie results.`);
+                    return [];
+                  }
+                  console.log(`[StreamingCommunity] Allowing non-Italian stream because GuardaHD/Guardaserie returned results.`);
                 }
               } else {
                 console.warn(`[StreamingCommunity] Playlist check failed (${playlistResponse.status}), skipping verification.`);
@@ -11052,11 +11091,6 @@ var require_animesaturn = __commonJS({
         const parsed = Number.parseInt(byLabel[1], 10);
         if (Number.isFinite(parsed) && parsed > 0) return parsed;
       }
-      const byAny = raw.match(/(\d{1,4})/);
-      if (byAny) {
-        const parsed = Number.parseInt(byAny[1], 10);
-        if (Number.isFinite(parsed) && parsed > 0) return parsed;
-      }
       return fallbackNum;
     }
     function isDirectMediaPath(value) {
@@ -11317,8 +11351,6 @@ var require_animesaturn = __commonJS({
       const episode = normalizeRequestedEpisode(requestedEpisode);
       const byNum = list.find((entry) => entry.num === episode);
       if (byNum) return byNum;
-      const byIndex = list[episode - 1];
-      if (byIndex) return byIndex;
       if (episode === 1) return list[0];
       return null;
     }
@@ -11370,6 +11402,7 @@ var require_animesaturn = __commonJS({
     function resolveWatchUrlsForEpisodeEntry(source, episodeEntry) {
       return __async(this, null, function* () {
         const urls = [];
+        const hasEpisodePath = Boolean(episodeEntry == null ? void 0 : episodeEntry.episodePath);
         if (episodeEntry == null ? void 0 : episodeEntry.watchUrl) {
           urls.push(...extractWatchUrlsFromHtml(episodeEntry.watchUrl));
         }
@@ -11387,6 +11420,11 @@ var require_animesaturn = __commonJS({
               console.error("[AnimeSaturn] episode page request failed:", error.message);
             }
           }
+        }
+        if (hasEpisodePath && urls.length === 0) {
+          const epLabel = Number.isFinite(Number(episodeEntry == null ? void 0 : episodeEntry.num)) ? episodeEntry.num : "?";
+          console.log(`[AnimeSaturn] No watch links for episode ${epLabel}. Skipping fallback.`);
+          return [];
         }
         if (urls.length === 0 && (source == null ? void 0 : source.animePath)) {
           const animeUrl = buildSaturnUrl(source.animePath);
@@ -11430,7 +11468,7 @@ var require_animesaturn = __commonJS({
         return output;
       });
     }
-    function extractStreamsFromAnimePath(animePath, requestedEpisode, mediaType = "tv") {
+    function extractStreamsFromAnimePath(animePath, requestedEpisode, mediaType = "tv", originalEpisode = null) {
       return __async(this, null, function* () {
         const normalizedPath = normalizeAnimeSaturnPath(animePath);
         if (!normalizedPath) return [];
@@ -11449,9 +11487,13 @@ var require_animesaturn = __commonJS({
           return [];
         }
         const normalizedEpisode = normalizeRequestedEpisode(requestedEpisode);
+        const normalizedOriginalEpisode = normalizeRequestedEpisode(
+          originalEpisode === null || originalEpisode === void 0 ? normalizedEpisode : originalEpisode
+        );
         let episodes = normalizeEpisodesList(parsedPage.episodes);
         let selected = pickEpisodeEntry(episodes, normalizedEpisode, mediaType);
-        if ((!selected || episodes.length === 0) && Array.isArray(parsedPage.relatedAnimePaths) && parsedPage.relatedAnimePaths.length > 0) {
+        const allowRelated = String(parsedPage.sourceTag || "").toUpperCase() !== "ITA";
+        if (allowRelated && (!selected || episodes.length === 0) && Array.isArray(parsedPage.relatedAnimePaths) && parsedPage.relatedAnimePaths.length > 0) {
           for (const related of parsedPage.relatedAnimePaths.slice(0, 2)) {
             try {
               const relatedUrl = buildSaturnUrl(related);
@@ -11471,6 +11513,10 @@ var require_animesaturn = __commonJS({
         if (!selected) return [];
         const baseTitle = sanitizeAnimeTitle(parsedPage.title) || "Unknown Title";
         const resolvedEpisode = parsePositiveInt(selected.num) || normalizedEpisode;
+        if (String(parsedPage.sourceTag || "").toUpperCase() === "ITA" && resolvedEpisode !== normalizedOriginalEpisode) {
+          console.log(`[AnimeSaturn] Skipping ITA episode ${resolvedEpisode} (requested ${normalizedOriginalEpisode}).`);
+          return [];
+        }
         const displayTitle = mediaType === "movie" ? baseTitle : `${baseTitle} - Ep ${resolvedEpisode}`;
         const streamLanguage = resolveLanguageEmoji(parsedPage.sourceTag);
         const initialWatchUrls = yield resolveWatchUrlsForEpisodeEntry(
@@ -11749,12 +11795,13 @@ var require_animesaturn = __commonJS({
           }
           if (animePaths.length === 0) return [];
           const requestedEpisode = resolveEpisodeFromMappingPayload(mappingPayload, lookup.episode);
+          const originalRequestedEpisode = normalizeRequestedEpisode(lookup.episode);
           const normalizedType = String(type || "").toLowerCase();
           const mediaType = normalizedType === "movie" ? "movie" : "tv";
           const perPathStreams = yield mapLimit(
             animePaths,
             3,
-            (path) => extractStreamsFromAnimePath(path, requestedEpisode, mediaType)
+            (path) => extractStreamsFromAnimePath(path, requestedEpisode, mediaType, originalRequestedEpisode)
           );
           const streams = perPathStreams.flat().filter((stream) => stream && stream.url);
           const deduped = [];

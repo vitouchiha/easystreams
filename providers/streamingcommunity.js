@@ -63,8 +63,8 @@ var require_provider_urls = __commonJS({
       animesaturn: "https://www.animesaturn.cx",
       streamingcommunity: "https://vixsrc.to",
       guardahd: "https://guardahd.stream",
-      guardaserie: "https://guardaserietv.autos",
-      guardoserie: "https://guardoserie.space",
+      guardaserie: "https://guardaserietv.skin",
+      guardoserie: "https://guardoserie.best",
       mapping_api: "https://animemapping.stremio.dpdns.org"
     };
   }
@@ -74,15 +74,15 @@ var require_provider_urls = __commonJS({
 var require_provider_urls2 = __commonJS({
   "src/provider_urls.js"(exports2, module2) {
     "use strict";
-    function safeRequire(moduleName) {
+    function safeRequire2(moduleName) {
       try {
         return require(moduleName);
       } catch (e) {
         return null;
       }
     }
-    var fs = safeRequire("fs");
-    var path = safeRequire("path");
+    var fs = safeRequire2("fs");
+    var path = safeRequire2("path");
     var embeddedProviderUrls = {};
     try {
       embeddedProviderUrls = require_provider_urls();
@@ -468,6 +468,15 @@ function getStreamingCommunityBaseUrl() {
 var { formatStream } = require_formatter();
 require_fetch_helper();
 var { checkQualityFromText } = require_quality_helper();
+function safeRequire(modulePath) {
+  try {
+    return require(modulePath);
+  } catch (e) {
+    return null;
+  }
+}
+var guardahd = safeRequire("../guardahd/index");
+var guardaserie = safeRequire("../guardaserie/index");
 var TMDB_API_KEY = "68e094699525b18a70bab2f86b1fa706";
 var USER_AGENT = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36";
 function getCommonHeaders() {
@@ -555,6 +564,31 @@ function getMetadata(id, type) {
     }
   });
 }
+function hasGuardaFallbackResults(id, type, season, episode, providerContext) {
+  return __async(this, null, function* () {
+    const normalizedType = String(type).toLowerCase();
+    const checks = [];
+    if (normalizedType === "movie" && guardahd && typeof guardahd.getStreams === "function") {
+      checks.push(
+        guardahd.getStreams(id, normalizedType, season, episode).then((streams) => Array.isArray(streams) && streams.length > 0).catch((e) => {
+          console.warn("[StreamingCommunity] GuardaHD fallback check failed:", e);
+          return false;
+        })
+      );
+    }
+    if (normalizedType === "tv" && guardaserie && typeof guardaserie.getStreams === "function") {
+      checks.push(
+        guardaserie.getStreams(id, normalizedType, season, episode, providerContext).then((streams) => Array.isArray(streams) && streams.length > 0).catch((e) => {
+          console.warn("[StreamingCommunity] Guardaserie fallback check failed:", e);
+          return false;
+        })
+      );
+    }
+    if (checks.length === 0) return false;
+    const results = yield Promise.all(checks);
+    return results.some(Boolean);
+  });
+}
 function getStreams(id, type, season, episode, providerContext = null) {
   return __async(this, null, function* () {
     const normalizedType = String(type).toLowerCase();
@@ -632,8 +666,13 @@ function getStreams(id, type, season, episode, providerContext = null) {
             if (hasItalian || originalLanguageItalian) {
               console.log(`[StreamingCommunity] Verified: Has Italian audio or original language is Italian.`);
             } else {
-              console.log(`[StreamingCommunity] No Italian audio found in playlist and original language is not Italian. Skipping.`);
-              return [];
+              console.log(`[StreamingCommunity] No Italian audio found in playlist and original language is not Italian. Checking GuardaHD/Guardaserie.`);
+              const fallbackOk = yield hasGuardaFallbackResults(id, normalizedType, resolvedSeason, episode, providerContext);
+              if (!fallbackOk) {
+                console.log(`[StreamingCommunity] Skipping non-Italian stream: no GuardaHD/Guardaserie results.`);
+                return [];
+              }
+              console.log(`[StreamingCommunity] Allowing non-Italian stream because GuardaHD/Guardaserie returned results.`);
             }
           } else {
             console.warn(`[StreamingCommunity] Playlist check failed (${playlistResponse.status}), skipping verification.`);
